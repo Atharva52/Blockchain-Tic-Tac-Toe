@@ -1,0 +1,450 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { ethers } = require('ethers');
+
+// Since we don't have the compiled artifacts yet, let's use minimal ABIs
+const PlayGameABI = [
+  "function createMatch(bytes32 matchId, address p1, address p2, uint256 stake) external",
+  "function matches(bytes32) view returns (address, address, uint256, uint8, uint256, bool, bool)",
+  "event MatchCreated(bytes32 indexed matchId, address player1, address player2, uint256 stake)",
+  "event Staked(bytes32 indexed matchId, address player, uint256 amount)",
+  "event Settled(bytes32 indexed matchId, address winner, uint256 payout)",
+  "event Refunded(bytes32 indexed matchId, address player1, address player2, uint256 amount)"
+];
+const GameTokenABI = [
+  "function balanceOf(address owner) view returns (uint256)"
+];
+const TokenStoreABI = [
+  "event Purchase(address indexed buyer, uint256 usdtAmount, uint256 gtOut)"
+];
+
+// Initialize Express app
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// In-memory data structures instead of SQLite
+const players = new Map(); // address => { wins, totalGtWon, matchesPlayed }
+const matches = new Map(); // matchId => { player1, player2, stake, winner, status, timestamp }
+
+// Function to check if we're in demo mode
+function isDemoMode() {
+  try {
+    if (process.env.DEMO_MODE === 'true') return true;
+    
+    const tokenStoreAddr = process.env.TOKEN_STORE_CONTRACT;
+    const gameTokenAddr = process.env.GAME_TOKEN_CONTRACT;
+    const playGameAddr = process.env.PLAY_GAME_CONTRACT;
+    
+    // Check if any contract addresses are placeholder or missing
+    if (!tokenStoreAddr || !gameTokenAddr || !playGameAddr) return true;
+    if (tokenStoreAddr.startsWith('0x00000000')) return true;
+    if (gameTokenAddr.startsWith('0x00000000')) return true;
+    if (playGameAddr.startsWith('0x00000000')) return true;
+    
+    return false;
+  } catch (error) {
+    console.log('Error checking demo mode:', error);
+    return true; // Default to demo mode if there's an error
+  }
+}
+
+// Setup demo data if in demo mode
+function setupDemoData() {
+  console.log('Setting up demo data...');
+  
+  // Create some demo players
+  const demoAddresses = [
+    '0x1234567890123456789012345678901234567890',
+    '0x2345678901234567890123456789012345678901',
+    '0x3456789012345678901234567890123456789012',
+    '0x4567890123456789012345678901234567890123',
+    '0x5678901234567890123456789012345678901234'
+  ];
+  
+  // Add random stats for demo players
+  demoAddresses.forEach((address, index) => {
+    const wins = Math.floor(Math.random() * 10);
+    const gtWon = (Math.random() * 1000).toFixed(2);
+    const matchesPlayed = wins + Math.floor(Math.random() * 10);
+    
+    players.set(address, {
+      wins,
+      totalGtWon: gtWon,
+      matchesPlayed
+    });
+  });
+  
+  // Create some demo matches
+  for (let i = 0; i < 10; i++) {
+    const matchId = '0x' + Date.now().toString(16) + i.toString();
+    const p1Index = Math.floor(Math.random() * demoAddresses.length);
+    let p2Index = Math.floor(Math.random() * demoAddresses.length);
+    while (p1Index === p2Index) {
+      p2Index = Math.floor(Math.random() * demoAddresses.length);
+    }
+    
+    const player1 = demoAddresses[p1Index];
+    const player2 = demoAddresses[p2Index];
+    const stake = (Math.random() * 100).toFixed(2);
+    const status = Math.floor(Math.random() * 3); // 0=CREATED, 1=STAKED, 2=SETTLED
+    
+    let winner = null;
+    if (status === 2) {
+      // If SETTLED, randomly pick a winner
+      winner = Math.random() > 0.5 ? player1 : player2;
+    }
+    
+    const timestamp = Math.floor(Date.now() / 1000) - Math.floor(Math.random() * 86400); // Random time in last 24 hours
+    
+    matches.set(matchId, {
+      player1,
+      player2,
+      stake,
+      status,
+      timestamp,
+      player1Staked: status >= 1,
+      player2Staked: status >= 1,
+      winner
+    });
+  }
+  
+  console.log(`Demo data setup complete with ${players.size} players and ${matches.size} matches`);
+}
+
+// Setup ethers provider and contracts only if not in demo mode
+let provider, playGameContract, gameTokenContract, tokenStoreContract;
+
+if (!isDemoMode()) {
+  try {
+    // Setup ethers provider
+    provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL || "http://localhost:8545");
+
+    // Contract instances
+    playGameContract = new ethers.Contract(
+      process.env.PLAY_GAME_CONTRACT,
+      PlayGameABI,
+      provider
+    );
+
+    gameTokenContract = new ethers.Contract(
+      process.env.GAME_TOKEN_CONTRACT,
+      GameTokenABI,
+      provider
+    );
+
+    tokenStoreContract = new ethers.Contract(
+      process.env.TOKEN_STORE_CONTRACT,
+      TokenStoreABI,
+      provider
+    );
+    
+    console.log('Real blockchain mode enabled for leaderboard');
+  } catch (error) {
+    console.error('Error initializing contracts, falling back to demo mode:', error);
+    setupDemoData();
+  }
+} else {
+  console.log('Demo mode enabled for leaderboard - using simulated data');
+  setupDemoData();
+}
+
+// Event Listeners - only set up if not in demo mode
+function setupEventListeners() {
+  if (isDemoMode()) {
+    console.log('Skipping event listeners in demo mode');
+    return;
+  }
+  
+  console.log('Setting up event listeners...');
+  
+  // Listen for Purchase events
+  tokenStoreContract.on('Purchase', async (buyer, usdtAmount, gtOut, event) => {
+    console.log(`New Purchase: ${buyer} bought ${ethers.utils.formatEther(gtOut)} GT with ${ethers.utils.formatUnits(usdtAmount, 6)} USDT`);
+    
+    // Ensure player exists in the memory store
+    if (!players.has(buyer)) {
+      players.set(buyer, { wins: 0, totalGtWon: '0', matchesPlayed: 0 });
+    }
+  });
+  
+  // Listen for Staked events
+  playGameContract.on('Staked', async (matchId, player, amount, event) => {
+    console.log(`New Stake: ${player} staked ${ethers.utils.formatEther(amount)} GT for match ${matchId}`);
+    
+    // Ensure player exists in the memory store
+    if (!players.has(player)) {
+      players.set(player, { wins: 0, totalGtWon: '0', matchesPlayed: 0 });
+    }
+    
+    // Update match in memory
+    if (matches.has(matchId)) {
+      const match = matches.get(matchId);
+      if (player === match.player1) {
+        match.player1Staked = true;
+      } else if (player === match.player2) {
+        match.player2Staked = true;
+      }
+      
+      if (match.player1Staked && match.player2Staked) {
+        match.status = 1; // STAKED
+        match.startTime = Math.floor(Date.now() / 1000);
+      }
+    }
+  });
+  
+  // Listen for Settled events
+  playGameContract.on('Settled', async (matchId, winner, payout, event) => {
+    console.log(`Match Settled: ${winner} won ${ethers.utils.formatEther(payout)} GT in match ${matchId}`);
+    
+    // Update match in memory
+    if (matches.has(matchId)) {
+      const match = matches.get(matchId);
+      match.status = 2; // SETTLED
+      match.winner = winner;
+    }
+    
+    // Update winner stats
+    if (!players.has(winner)) {
+      players.set(winner, { wins: 1, totalGtWon: ethers.utils.formatEther(payout), matchesPlayed: 1 });
+    } else {
+      const player = players.get(winner);
+      player.wins += 1;
+      player.totalGtWon = (parseFloat(player.totalGtWon) + parseFloat(ethers.utils.formatEther(payout))).toString();
+      player.matchesPlayed += 1;
+    }
+    
+    // Update players' matches played
+    if (matches.has(matchId)) {
+      const match = matches.get(matchId);
+      if (match.player1 !== winner && players.has(match.player1)) {
+        const player = players.get(match.player1);
+        player.matchesPlayed += 1;
+      }
+      if (match.player2 !== winner && players.has(match.player2)) {
+        const player = players.get(match.player2);
+        player.matchesPlayed += 1;
+      }
+    }
+  });
+  
+  // Listen for Refunded events
+  playGameContract.on('Refunded', async (matchId, player1, player2, amount, event) => {
+    console.log(`Match Refunded: ${player1} and ${player2} were refunded ${ethers.utils.formatEther(amount)} GT each for match ${matchId}`);
+    
+    // Update match in memory
+    if (matches.has(matchId)) {
+      const match = matches.get(matchId);
+      match.status = 3; // REFUNDED
+    }
+    
+    // Update players' matches played
+    if (players.has(player1)) {
+      const player = players.get(player1);
+      player.matchesPlayed += 1;
+    }
+    if (players.has(player2)) {
+      const player = players.get(player2);
+      player.matchesPlayed += 1;
+    }
+  });
+  
+  // Listen for MatchCreated events
+  playGameContract.on('MatchCreated', async (matchId, player1, player2, stake, event) => {
+    console.log(`Match Created: ${player1} vs ${player2} with stake ${ethers.utils.formatEther(stake)} GT (ID: ${matchId})`);
+    
+    // Ensure players exist in memory
+    if (!players.has(player1)) {
+      players.set(player1, { wins: 0, totalGtWon: '0', matchesPlayed: 0 });
+    }
+    if (!players.has(player2)) {
+      players.set(player2, { wins: 0, totalGtWon: '0', matchesPlayed: 0 });
+    }
+    
+    // Add match to memory
+    matches.set(matchId, {
+      player1,
+      player2,
+      stake: ethers.utils.formatEther(stake),
+      status: 0, // CREATED
+      timestamp: Math.floor(Date.now() / 1000),
+      player1Staked: false,
+      player2Staked: false,
+      winner: null
+    });
+  });
+  
+  console.log('Event listeners setup complete');
+}
+
+// Mock data update function for demo mode - simulates new matches and activity
+function startDemoDataUpdates() {
+  if (!isDemoMode()) return;
+  
+  console.log('Starting demo data update cycle');
+  
+  // Every 30 seconds, add a new match or update an existing one
+  setInterval(() => {
+    const demoAddresses = Array.from(players.keys());
+    const action = Math.floor(Math.random() * 3); // 0=new match, 1=stake, 2=settle
+    
+    if (action === 0) {
+      // Create a new match
+      const matchId = '0x' + Date.now().toString(16);
+      const p1Index = Math.floor(Math.random() * demoAddresses.length);
+      let p2Index = Math.floor(Math.random() * demoAddresses.length);
+      while (p1Index === p2Index) {
+        p2Index = Math.floor(Math.random() * demoAddresses.length);
+      }
+      
+      const player1 = demoAddresses[p1Index];
+      const player2 = demoAddresses[p2Index];
+      const stake = (Math.random() * 100).toFixed(2);
+      
+      matches.set(matchId, {
+        player1,
+        player2,
+        stake,
+        status: 0, // CREATED
+        timestamp: Math.floor(Date.now() / 1000),
+        player1Staked: false,
+        player2Staked: false,
+        winner: null
+      });
+      
+      console.log(`[DEMO] New match created: ${player1.substring(0, 8)}... vs ${player2.substring(0, 8)}... with stake ${stake} GT`);
+    } else if (action === 1) {
+      // Stake on an existing match
+      const createdMatches = Array.from(matches.entries())
+        .filter(([_, match]) => match.status === 0);
+      
+      if (createdMatches.length > 0) {
+        const randomIndex = Math.floor(Math.random() * createdMatches.length);
+        const [matchId, match] = createdMatches[randomIndex];
+        
+        if (!match.player1Staked) {
+          match.player1Staked = true;
+          console.log(`[DEMO] Player ${match.player1.substring(0, 8)}... staked for match ${matchId.substring(0, 10)}...`);
+        } else if (!match.player2Staked) {
+          match.player2Staked = true;
+          console.log(`[DEMO] Player ${match.player2.substring(0, 8)}... staked for match ${matchId.substring(0, 10)}...`);
+        }
+        
+        if (match.player1Staked && match.player2Staked) {
+          match.status = 1; // STAKED
+          console.log(`[DEMO] Match ${matchId.substring(0, 10)}... is now fully staked`);
+        }
+      }
+    } else if (action === 2) {
+      // Settle an existing staked match
+      const stakedMatches = Array.from(matches.entries())
+        .filter(([_, match]) => match.status === 1);
+      
+      if (stakedMatches.length > 0) {
+        const randomIndex = Math.floor(Math.random() * stakedMatches.length);
+        const [matchId, match] = stakedMatches[randomIndex];
+        
+        const winner = Math.random() > 0.5 ? match.player1 : match.player2;
+        match.winner = winner;
+        match.status = 2; // SETTLED
+        
+        // Update winner stats
+        const player = players.get(winner);
+        player.wins += 1;
+        const payout = parseFloat(match.stake) * 2;
+        player.totalGtWon = (parseFloat(player.totalGtWon) + payout).toString();
+        player.matchesPlayed += 1;
+        
+        // Update loser stats
+        const loser = winner === match.player1 ? match.player2 : match.player1;
+        const loserData = players.get(loser);
+        loserData.matchesPlayed += 1;
+        
+        console.log(`[DEMO] Match ${matchId.substring(0, 10)}... settled: ${winner.substring(0, 8)}... won ${payout} GT`);
+      }
+    }
+  }, 30000); // Every 30 seconds
+}
+
+// API Endpoints
+app.get('/leaderboard', (req, res) => {
+  // Convert map to array, sort by total GT won
+  const leaderboardArray = Array.from(players.entries())
+    .map(([address, data]) => ({
+      address,
+      ...data
+    }))
+    .sort((a, b) => parseFloat(b.totalGtWon) - parseFloat(a.totalGtWon))
+    .slice(0, 10);
+  
+  res.json({
+    success: true,
+    demoMode: isDemoMode(),
+    leaderboard: leaderboardArray
+  });
+});
+
+app.get('/player/:address', (req, res) => {
+  const { address } = req.params;
+  
+  if (!players.has(address)) {
+    return res.status(404).json({ error: 'Player not found' });
+  }
+  
+  res.json({
+    success: true,
+    demoMode: isDemoMode(),
+    player: {
+      address,
+      ...players.get(address)
+    }
+  });
+});
+
+app.get('/matches', (req, res) => {
+  // Convert map to array, sort by timestamp
+  const matchesArray = Array.from(matches.entries())
+    .map(([matchId, data]) => ({
+      match_id: matchId,
+      ...data
+    }))
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 20);
+  
+  res.json({
+    success: true,
+    demoMode: isDemoMode(),
+    matches: matchesArray
+  });
+});
+
+// Status endpoint to check if we're in demo mode
+app.get('/status', (req, res) => {
+  res.json({
+    demoMode: isDemoMode(),
+    contracts: {
+      tokenStore: process.env.TOKEN_STORE_CONTRACT || 'Not configured',
+      gameToken: process.env.GAME_TOKEN_CONTRACT || 'Not configured',
+      playGame: process.env.PLAY_GAME_CONTRACT || 'Not configured'
+    },
+    stats: {
+      players: players.size,
+      matches: matches.size
+    }
+  });
+});
+
+// Start the server and listeners
+const PORT = process.env.LEADERBOARD_PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Leaderboard server running on port ${PORT}`);
+  console.log(`Demo mode: ${isDemoMode() ? 'ENABLED' : 'DISABLED'}`);
+  
+  // Setup event listeners or demo data updates based on mode
+  if (isDemoMode()) {
+    startDemoDataUpdates();
+  } else {
+    setupEventListeners();
+  }
+});

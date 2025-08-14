@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Tic-Tac-Toe</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+</head>
+<body>
+
+    <div class="app-container">
+        <header class="app-header">
+            <h1 class="game-title">Blockchain Tic-Tac-Toe</h1>
+            <div id="wallet-status" class="wallet-status">Wallet Status: Not Connected</div>
+        </header>
+
+        <main class="main-content">
+            <div class="player-container">
+                <div class="player-card">
+                    <h3 class="player-label">Player 1 (Me)</h3>
+                    <p class="player-address" id="player1-address">Loading...</p>
+                    <div class="player-balances">
+                        <p>GT: <span id="player1-gt-balance">0</span></p>
+                        <p>USDT: <span id="player1-usdt-balance">0</span></p>
+                    </div>
+                </div>
+                <div class="player-card">
+                    <h3 class="player-label">Player 2</h3>
+                    <p class="player-address" id="player2-address">Waiting...</p>
+                    <div class="player-balances">
+                        <p>GT: <span id="player2-gt-balance">0</span></p>
+                        <p>USDT: <span id="player2-usdt-balance">0</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="game-area-container">
+                <h2 id="matchmaking-status" class="status-message">Connect your wallet to begin.</h2>
+                <div id="find-match-btn-container">
+                    <button id="find-match-btn" class="action-button">Find Match</button>
+                </div>
+                <div id="stake-btn-container">
+                    <button id="stake-btn" class="action-button">Stake Tokens</button>
+                </div>
+                
+                <div id="game-board" class="game-board" style="display: none;">
+                    <div class="cell" data-cell-index="0"></div>
+                    <div class="cell" data-cell-index="1"></div>
+                    <div class="cell" data-cell-index="2"></div>
+                    <div class="cell" data-cell-index="3"></div>
+                    <div class="cell" data-cell-index="4"></div>
+                    <div class="cell" data-cell-index="5"></div>
+                    <div class="cell" data-cell-index="6"></div>
+                    <div class="cell" data-cell-index="7"></div>
+                    <div class="cell" data-cell-index="8"></div>
+                </div>
+                
+                <h2 id="game-status" class="game-status"></h2>
+                <div id="transaction-proof-container" style="display: none;">
+                    <p id="transaction-proof" class="transaction-proof"></p>
+                </div>
+                
+                <button id="game-reset-btn" class="action-button reset-button" style="display: none;">Play Again</button>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="deployed-contracts.json"></script>
+    <script src="game.js"></script>
+</body>
+</html>

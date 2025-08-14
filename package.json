@@ -1,0 +1,15 @@
+{
+  "name": "blockchain-gaming-platform",
+  "version": "1.0.0",
+  "description": "Complete blockchain gaming platform with smart contracts, API, frontend, and leaderboard",
+  "scripts": {
+    "install:all": "npm run install:contracts && npm run install:api && npm run install:tools",
+    "install:contracts": "cd contracts && npm install",
+    "install:api": "cd api && npm install",
+    "install:tools": "cd tools && npm install",
+    "start:api": "cd api && npm start",
+    "start:leaderboard": "cd tools && npm start"
+  },
+  "author": "",
+  "license": "MIT"
+}

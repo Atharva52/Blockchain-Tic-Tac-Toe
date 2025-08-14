@@ -1,0 +1,341 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { ethers } = require('ethers');
+const path = require('path');
+const fs = require('fs');
+
+// Since we don't have the compiled artifacts yet, let's use minimal ABIs
+const TokenStoreABI = [
+  "function buy(uint256 usdtAmount) external",
+  "event Purchase(address indexed buyer, uint256 usdtAmount, uint256 gtOut)"
+];
+const PlayGameABI = [
+  "function createMatch(bytes32 matchId, address p1, address p2, uint256 stake) external",
+  "function stake(bytes32 matchId) external",
+  "function commitResult(bytes32 matchId, address winner) external",
+  "function matches(bytes32) view returns (address, address, uint256, uint8, uint256, bool, bool)",
+  "event MatchCreated(bytes32 indexed matchId, address player1, address player2, uint256 stake)",
+  "event Staked(bytes32 indexed matchId, address player, uint256 amount)",
+  "event Settled(bytes32 indexed matchId, address winner, uint256 payout)"
+];
+const GameTokenABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function mint(address to, uint256 amount) external"
+];
+
+// Initialize Express app
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Function to check if we're in demo mode
+function isDemoMode() {
+  try {
+    if (process.env.DEMO_MODE === 'true') return true;
+    
+    const tokenStoreAddr = process.env.TOKEN_STORE_CONTRACT;
+    const gameTokenAddr = process.env.GAME_TOKEN_CONTRACT;
+    const playGameAddr = process.env.PLAY_GAME_CONTRACT;
+    
+    // Check if any contract addresses are placeholder or missing
+    if (!tokenStoreAddr || !gameTokenAddr || !playGameAddr) return true;
+    if (tokenStoreAddr.startsWith('0x00000000')) return true;
+    if (gameTokenAddr.startsWith('0x00000000')) return true;
+    if (playGameAddr.startsWith('0x00000000')) return true;
+    
+    return false;
+  } catch (error) {
+    console.log('Error checking demo mode:', error);
+    return true; // Default to demo mode if there's an error
+  }
+}
+
+// Setup ethers provider and wallet
+let provider, wallet, tokenStoreContract, playGameContract, gameTokenContract;
+
+// Only initialize real blockchain connections if not in demo mode
+if (!isDemoMode()) {
+  try {
+    provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL);
+    wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+
+    // Contract instances
+    tokenStoreContract = new ethers.Contract(
+      process.env.TOKEN_STORE_CONTRACT,
+      TokenStoreABI,
+      wallet
+    );
+
+    playGameContract = new ethers.Contract(
+      process.env.PLAY_GAME_CONTRACT,
+      PlayGameABI,
+      wallet
+    );
+
+    gameTokenContract = new ethers.Contract(
+      process.env.GAME_TOKEN_CONTRACT,
+      GameTokenABI,
+      wallet
+    );
+    
+    console.log('Real blockchain mode enabled');
+  } catch (error) {
+    console.error('Error initializing contracts, falling back to demo mode:', error);
+  }
+} else {
+  console.log('Demo mode enabled - no real blockchain transactions will occur');
+}
+
+// Endpoint to purchase GT with USDT
+app.get('/purchase', async (req, res) => {
+  try {
+    const { amount } = req.query;
+    
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+    
+    // Check if we're in demo mode
+    if (isDemoMode()) {
+      // Simulate a transaction with a fake hash
+      const fakeHash = '0x' + Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+      
+      // Calculate a simulated GT amount (1000 GT per 1 USDT)
+      const gtAmount = parseFloat(amount) * 1000;
+      
+      // Return a simulated successful response
+      return res.json({
+        success: true,
+        transaction: fakeHash,
+        demoMode: true,
+        event: {
+          buyer: '0x' + '0'.repeat(40),
+          usdtAmount: amount,
+          gtOut: gtAmount.toString()
+        }
+      });
+    }
+    
+    // Real blockchain logic
+    // Convert amount to USDT units (6 decimals)
+    const usdtAmount = ethers.utils.parseUnits(amount, 6);
+    
+    // Call buy function on TokenStore contract
+    const tx = await tokenStoreContract.buy(usdtAmount);
+    const receipt = await tx.wait();
+    
+    // Find Purchase event in the transaction receipt
+    const event = receipt.events.find(e => e.event === 'Purchase');
+    
+    res.json({
+      success: true,
+      transaction: tx.hash,
+      event: event ? {
+        buyer: event.args.buyer,
+        usdtAmount: ethers.utils.formatUnits(event.args.usdtAmount, 6),
+        gtOut: ethers.utils.formatEther(event.args.gtOut)
+      } : null
+    });
+  } catch (error) {
+    console.error('Purchase error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint to create a match
+app.post('/match/start', async (req, res) => {
+  try {
+    const { player1, player2, stake } = req.body;
+    
+    if (!player1 || !player2 || !stake || isNaN(stake) || parseFloat(stake) <= 0) {
+      return res.status(400).json({ error: 'Invalid parameters' });
+    }
+    
+    // Generate a unique match ID (keccak256 hash of players + timestamp)
+    const timestamp = Date.now().toString();
+    const matchId = ethers.utils.keccak256(
+      ethers.utils.defaultAbiCoder.encode(
+        ['address', 'address', 'string'],
+        [player1, player2, timestamp]
+      )
+    );
+    
+    // Convert stake to GT units (18 decimals)
+    const stakeAmount = ethers.utils.parseEther(stake);
+    
+    // Check if we're in demo mode
+    if (isDemoMode()) {
+      // Simulate a transaction with a fake hash
+      const fakeHash = '0x' + Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+      
+      // Return a simulated successful response
+      return res.json({
+        success: true,
+        transaction: fakeHash,
+        demoMode: true,
+        matchId: matchId,
+        player1,
+        player2,
+        stake: stake,
+        event: {
+          matchId: matchId,
+          player1: player1,
+          player2: player2,
+          stake: stake
+        }
+      });
+    }
+    
+    // Real blockchain logic
+    // Call createMatch on PlayGame contract
+    const tx = await playGameContract.createMatch(matchId, player1, player2, stakeAmount);
+    const receipt = await tx.wait();
+    
+    // Find MatchCreated event in the transaction receipt
+    const event = receipt.events.find(e => e.event === 'MatchCreated');
+    
+    res.json({
+      success: true,
+      transaction: tx.hash,
+      matchId: matchId,
+      player1,
+      player2,
+      stake: ethers.utils.formatEther(stakeAmount),
+      event: event ? {
+        matchId: event.args.matchId,
+        player1: event.args.player1,
+        player2: event.args.player2,
+        stake: ethers.utils.formatEther(event.args.stake)
+      } : null
+    });
+  } catch (error) {
+    console.error('Match creation error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint to submit match result
+app.post('/match/result', async (req, res) => {
+  try {
+    const { matchId, winner } = req.body;
+    
+    if (!matchId || !winner) {
+      return res.status(400).json({ error: 'Missing matchId or winner address' });
+    }
+    
+    // Check if we're in demo mode
+    if (isDemoMode()) {
+      // Simulate a transaction with a fake hash
+      const fakeHash = '0x' + Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+      
+      // Calculate a simulated payout (twice the stake)
+      const payout = "2";
+      
+      // Return a simulated successful response
+      return res.json({
+        success: true,
+        transaction: fakeHash,
+        demoMode: true,
+        matchId,
+        winner,
+        event: {
+          matchId: matchId,
+          winner: winner,
+          payout: payout
+        }
+      });
+    }
+    
+    // Real blockchain logic
+    // Call commitResult on PlayGame contract
+    const tx = await playGameContract.commitResult(matchId, winner);
+    const receipt = await tx.wait();
+    
+    // Find Settled event in the transaction receipt
+    const event = receipt.events.find(e => e.event === 'Settled');
+    
+    res.json({
+      success: true,
+      transaction: tx.hash,
+      matchId,
+      winner,
+      event: event ? {
+        matchId: event.args.matchId,
+        winner: event.args.winner,
+        payout: ethers.utils.formatEther(event.args.payout)
+      } : null
+    });
+  } catch (error) {
+    console.error('Result submission error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper endpoint to get match details
+app.get('/match/:matchId', async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    
+    if (!matchId) {
+      return res.status(400).json({ error: 'Missing matchId' });
+    }
+    
+    // Check if we're in demo mode
+    if (isDemoMode()) {
+      // Return simulated match data
+      return res.json({
+        success: true,
+        demoMode: true,
+        match: {
+          player1: '0x1234567890123456789012345678901234567890',
+          player2: '0x0987654321098765432109876543210987654321',
+          stake: '1.0',
+          status: 'CREATED',
+          startTime: Date.now().toString(),
+          player1Staked: false,
+          player2Staked: false
+        }
+      });
+    }
+    
+    // Real blockchain logic
+    // Get match details from the PlayGame contract
+    const match = await playGameContract.matches(matchId);
+    
+    res.json({
+      success: true,
+      match: {
+        player1: match.player1,
+        player2: match.player2,
+        stake: ethers.utils.formatEther(match.stake),
+        status: ['CREATED', 'STAKED', 'SETTLED', 'REFUNDED'][match.status],
+        startTime: match.startTime.toString(),
+        player1Staked: match.player1Staked,
+        player2Staked: match.player2Staked
+      }
+    });
+  } catch (error) {
+    console.error('Match details error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Status endpoint to check if we're in demo mode
+app.get('/status', (req, res) => {
+  res.json({
+    demoMode: isDemoMode(),
+    contracts: {
+      tokenStore: process.env.TOKEN_STORE_CONTRACT || 'Not configured',
+      gameToken: process.env.GAME_TOKEN_CONTRACT || 'Not configured',
+      playGame: process.env.PLAY_GAME_CONTRACT || 'Not configured'
+    }
+  });
+});
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Demo mode: ${isDemoMode() ? 'ENABLED' : 'DISABLED'}`);
+});

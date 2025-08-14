@@ -1,0 +1,170 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+
+:root {
+    --bg-color: #121212;
+    --card-color: #1e1e1e;
+    --primary-color: #bb86fc;
+    --accent-color: #03dac6;
+    --text-color: #e0e0e0;
+    --error-color: #cf6679;
+    --success-color: #4CAF50;
+    --border-color: #333333;
+}
+
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    text-align: center;
+}
+
+.app-container {
+    background-color: var(--card-color);
+    padding: 2.5rem;
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    width: 90%;
+    max-width: 600px;
+}
+
+.app-header {
+    margin-bottom: 2rem;
+}
+
+.game-title {
+    color: var(--primary-color);
+    font-size: 2.5rem;
+    margin: 0;
+}
+
+.wallet-status {
+    font-size: 0.9rem;
+    color: var(--text-color);
+    margin-top: 0.5rem;
+}
+
+.wallet-status.connected {
+    color: var(--success-color);
+}
+
+.player-container {
+    display: flex;
+    justify-content: space-around;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.player-card {
+    background-color: var(--bg-color);
+    padding: 1.5rem;
+    border-radius: 8px;
+    flex-grow: 1;
+    border: 1px solid var(--border-color);
+}
+
+.player-label {
+    margin: 0 0 0.5rem 0;
+    color: var(--accent-color);
+    font-size: 1.2rem;
+}
+
+.player-address {
+    font-family: monospace;
+    font-size: 0.85rem;
+    word-break: break-all;
+    margin-bottom: 1rem;
+}
+
+.player-balances {
+    text-align: left;
+}
+
+.player-balances p {
+    margin: 0.25rem 0;
+}
+
+.status-message {
+    font-size: 1.2rem;
+    font-weight: 700;
+    min-height: 1.5rem;
+    margin: 0;
+}
+
+.game-area-container {
+    margin-top: 2rem;
+}
+
+.game-board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 320px;
+    height: 320px;
+    margin: 2rem auto;
+}
+
+.cell {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    font-size: 4rem;
+    font-weight: 700;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.cell:hover {
+    background-color: var(--border-color);
+    transform: scale(1.05);
+}
+
+.action-button {
+    background-color: var(--primary-color);
+    color: #000;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 700;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.action-button:hover {
+    background-color: #926ce4;
+    transform: translateY(-2px);
+}
+
+.reset-button {
+    background-color: var(--error-color);
+    margin-top: 1rem;
+}
+
+.reset-button:hover {
+    background-color: #b35161;
+}
+
+.game-status {
+    font-size: 1.2rem;
+    min-height: 1.5rem;
+    margin-top: 1rem;
+    font-weight: 700;
+}
+
+.transaction-proof a {
+    color: var(--accent-color);
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.transaction-proof a:hover {
+    text-decoration: underline;
+}
