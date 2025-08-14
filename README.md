@@ -6,9 +6,9 @@
 
 ## 📸 Screenshots
 
-| On-chain Payout | In-Game View |
-| :---: | :---: |
-| ![Successful Payout Screenshot](assets/screenShot.png)
+<p align="center">
+  <img src="assets/screenShot.png" alt="Successful Payout Screenshot" width="500"/>
+</p>
 
 ---
 
@@ -55,8 +55,8 @@ Follow these steps to get the project running on your local machine.
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git)
-    cd YOUR_REPO_NAME
+    git clone [https://github.com/Atharva52/Blockchain-Tic-Tac-Toe.git](https://github.com/Atharva52/Blockchain-Tic-Tac-Toe.git)
+    cd Blockchain-Tic-Tac-Toe
     ```
 
 2.  **Start the Local Blockchain (Hardhat Node):**
